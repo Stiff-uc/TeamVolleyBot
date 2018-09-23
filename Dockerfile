@@ -14,7 +14,7 @@ WORKDIR /go/src/pollrbot
 RUN go get ./
 RUN go build
 
-RUN /usr/bin/sqlite3 /db/database.db
+RUN mkdir -p /db && chmod 777 /db
 
 WORKDIR /go/src/pollrbot
 CMD DB=/db/database.db APITOKEN=$TOKEN pollrbot
