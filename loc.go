@@ -3,13 +3,13 @@ package main
 import "fmt"
 
 var (
-	locGotQuestion          = "OK now that we got a question, please send answer options to your poll."
+	locGotQuestion          = "Send raid starting time (format 15:04 or 15.04):"
 	locStartCommand         = "/start"
 	locEditCommand          = "/edit"
 	locCreateNewPoll        = "create new poll"
 	locInlineInsertPoll     = "insert poll into chat"
 	locSharePoll            = "share poll"
-	locNewQuestion          = "Great! Send a question for the new poll, please."
+	locNewQuestion          = "Great! Send raid description, please."
 	locEditQuestion         = "Okay, just send the new question, please."
 	locEditQuestionButton   = "change question"
 	locAddOption            = "Alright, send options that you want to add to the poll, please."
