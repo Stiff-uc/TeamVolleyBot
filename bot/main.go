@@ -1,13 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"time"
 
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	//"github.com/go-telegram-bot-api/telegram-bot-api"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -105,6 +106,9 @@ func run() error {
 				log.Printf("Could not update poll #%d: %v", pollid, err)
 			}
 		case update := <-updates:
+			s, _ := json.MarshalIndent(update, "", "\t")
+			log.Printf("Message:\n %s ", s)
+
 			stopTimer := newTimer()
 			defer stopTimer()
 
@@ -117,7 +121,7 @@ func run() error {
 					log.Printf("could not save user: %v", err)
 				}
 
-				if update.InlineQuery.From.ID == 3761925 {
+				if update.InlineQuery.From.ID == 373922972 {
 					err = handleInlineQueryAdmin(bot, update, st)
 					if err != nil {
 						log.Printf("could not handle inline query: %v", err)
@@ -174,10 +178,25 @@ func run() error {
 			// Messages
 			log.Printf("Message from [%s] %s", update.Message.From.UserName, update.Message.Text)
 
-			// Conversations
-			err = handleDialog(bot, update, st)
-			if err != nil {
-				log.Printf("could not handle dialog: %v", err)
+			if update.Message.Chat.Type == "private" {
+				// Conversations
+				err = handleDialog(bot, update, st)
+				if err != nil {
+					log.Printf("could not handle dialog: %v", err)
+				}
+			} else {
+				log.Printf("Message is public - analysing")
+				// handle chat leave
+				if update.Message.Chat.Type == "group" && update.Message.LeftChatMember != nil {
+					if update.Message.LeftChatMember.UserName == "team_volley_bot" {
+						log.Print("Kicked from chat")
+					}
+				}
+				if update.Message.Chat.Type == "group" && update.Message.NewChatMembers != nil {
+					if (*update.Message.NewChatMembers)[0].UserName == "team_volley_bot" {
+						log.Printf("Added to chat %s by %s (%s)", update.Message.Chat.Title, update.Message.From.UserName, update.Message.From.FirstName)
+					}
+				}
 			}
 		}
 	}
