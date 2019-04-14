@@ -3,11 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
-	"time"
 
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"github.com/kyokomi/emoji"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
@@ -77,6 +77,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 		p := &poll{
 			Question: update.Message.Text,
 			UserID:   update.Message.From.ID,
+			Type:     1,
 		}
 
 		pollid, err = st.SavePoll(p)
@@ -84,19 +85,55 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 			return fmt.Errorf("could not save poll: %v", err)
 		}
 
-		msg := tgbotapi.NewMessage(int64(update.Message.From.ID), locGotQuestion)
-		_, err = bot.Send(&msg)
+		// msg := tgbotapi.NewMessage(int64(update.Message.From.ID), locGotQuestion)
+		// _, err = bot.Send(&msg)
+		// if err != nil {
+		// 	return fmt.Errorf("could not send message: %v", err)
+		// }
+
+		// state = waitingForOption
+		// err = st.SaveState(update.Message.From.ID, pollid, state)
+		// if err != nil {
+		// 	return fmt.Errorf("could not save state: %v", err)
+		// }
+
+		opts := []option{
+			option{
+				PollID: pollid,
+				Text:   emoji.Sprintf(":red_circle:"),
+			}}
+		opts = append(opts, option{
+			PollID: pollid,
+			Text:   emoji.Sprintf(":white_circle:"), // "\U0001F7E2", // for green_cirlcle (not supported yet)
+		})
+		opts = append(opts, option{
+			PollID: pollid,
+			Text:   emoji.Sprintf(":blue_circle:"),
+		})
+		opts = append(opts, option{
+			PollID: pollid,
+			Text:   "+1",
+		})
+		opts = append(opts, option{
+			PollID: pollid,
+			Text:   "+2",
+		})
+
+		err = st.SaveOptions(opts)
 		if err != nil {
-			return fmt.Errorf("could not send message: %v", err)
+			return fmt.Errorf("could not save option: %v", err)
+		}
+		p, err = st.GetPoll(pollid)
+		if err != nil {
+			return fmt.Errorf("could not get poll: %v", err)
 		}
 
-		state = waitingForOption
-		err = st.SaveState(update.Message.From.ID, pollid, state)
+		_, err = sendInterMessage(bot, update, p)
 		if err != nil {
-			return fmt.Errorf("could not save state: %v", err)
+			return fmt.Errorf("could not send inter message: %v", err)
 		}
-
 		return nil
+
 	}
 
 	if state == editQuestion {
@@ -151,71 +188,6 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 		if err != nil {
 			return fmt.Errorf("could not send message: %v", err)
 		}
-	}
-
-	if state == waitingForOption {
-		formatStr := "15:04"
-		re := regexp.MustCompile("^[0-9]{1,2}(:|\\.)[0-9]{2}")
-		//re1 := regexp.MustCompile("^[0-9]{1,2}(:)[0-9]{2}$")
-		re2 := regexp.MustCompile("^[0-9]{1,2}(\\.)[0-9]{2}")
-		timeStr := re.FindString(update.Message.Text)
-		if len(timeStr) == 0 {
-			return fmt.Errorf("Input doesn't match time format: %v", err)
-		}
-		if re2.MatchString(timeStr) {
-			formatStr = "15.04"
-		}
-
-		startTime, err := time.Parse(formatStr, timeStr)
-		if err != nil {
-			return fmt.Errorf("Invalid time format: %v", err)
-		}
-		opts := []option{
-			option{
-				PollID: pollid,
-				Text:   startTime.Format(formatStr),
-			}}
-
-		// Add default times form poll if empty
-		p, err := st.GetPoll(pollid)
-		if err != nil {
-			return fmt.Errorf("could not get poll: %v", err)
-		}
-		if len(p.Options) == 0 {
-			// Round 2nd & 3rd options to next 5 minutes
-			if startTime.Minute() % 5 != 0 {
-				offset := 5 - startTime.Minute() % 5
-				startTime = startTime.Add(time.Minute * time.Duration(offset))
-			}
-			second := startTime.Add(time.Minute * 15)
-			third := startTime.Add(time.Minute * 30)
-
-			opts = append(opts,
-				option{
-							PollID: pollid,
-							Text:   second.Format(formatStr),
-				})
-			opts = append(opts,
-				option{
-							PollID: pollid,
-							Text:   third.Format(formatStr),
-				})
-		}
-
-		err = st.SaveOptions(opts)
-		if err != nil {
-			return fmt.Errorf("could not save option: %v", err)
-		}
-		p, err = st.GetPoll(pollid)
-		if err != nil {
-			return fmt.Errorf("could not get poll: %v", err)
-		}
-
-		_, err = sendInterMessage(bot, update, p)
-		if err != nil {
-			return fmt.Errorf("could not send inter message: %v", err)
-		}
-		return nil
 	}
 
 	if state == pollDone {

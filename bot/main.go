@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -106,8 +105,8 @@ func run() error {
 				log.Printf("Could not update poll #%d: %v", pollid, err)
 			}
 		case update := <-updates:
-			s, _ := json.MarshalIndent(update, "", "\t")
-			log.Printf("Message:\n %s ", s)
+			// s, _ := json.MarshalIndent(update, "", "\t")
+			// log.Printf("Message:\n %s ", s)
 
 			stopTimer := newTimer()
 			defer stopTimer()
@@ -116,7 +115,7 @@ func run() error {
 			if update.InlineQuery != nil {
 				log.Printf("InlineQuery from [%s]: %s", update.InlineQuery.From.UserName, update.InlineQuery.Query)
 
-				err = st.SaveUser(update.InlineQuery.From)
+				err = st.SaveUser(update.InlineQuery.From, 0)
 				if err != nil {
 					log.Printf("could not save user: %v", err)
 				}
@@ -153,7 +152,7 @@ func run() error {
 			if update.CallbackQuery != nil {
 				log.Printf("CallbackQuery from [%s]: %s", update.CallbackQuery.From.UserName, update.CallbackQuery.Data)
 
-				err = st.SaveUser(update.CallbackQuery.From)
+				err = st.SaveUser(update.CallbackQuery.From, 0)
 				if err != nil {
 					log.Printf("could not save user: %v", err)
 				}
@@ -170,7 +169,7 @@ func run() error {
 				continue
 			}
 
-			err = st.SaveUser(update.Message.From)
+			err = st.SaveUser(update.Message.From, update.Message.Chat.ID)
 			if err != nil {
 				log.Printf("could not save user: %v", err)
 			}
@@ -190,11 +189,13 @@ func run() error {
 				if update.Message.Chat.Type == "group" && update.Message.LeftChatMember != nil {
 					if update.Message.LeftChatMember.UserName == "team_volley_bot" {
 						log.Print("Kicked from chat")
+						st.LeaveChat(update.Message.Chat)
 					}
 				}
 				if update.Message.Chat.Type == "group" && update.Message.NewChatMembers != nil {
 					if (*update.Message.NewChatMembers)[0].UserName == "team_volley_bot" {
 						log.Printf("Added to chat %s by %s (%s)", update.Message.Chat.Title, update.Message.From.UserName, update.Message.From.FirstName)
+						st.EnterChat(update.Message.Chat, update.Message.From.ID)
 					}
 				}
 			}

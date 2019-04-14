@@ -6,7 +6,7 @@ import (
 	"log"
 	"strconv"
 
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/kyokomi/emoji"
 )
 
@@ -108,7 +108,7 @@ func buildPollMarkup(p *poll) *tgbotapi.InlineKeyboardMarkup {
 			}
 		}
 	}
-
+	cnt := 0
 	for _, o := range p.Options {
 		textWidth := 0
 		if row != -1 {
@@ -117,13 +117,14 @@ func buildPollMarkup(p *poll) *tgbotapi.InlineKeyboardMarkup {
 			}
 		}
 		textWidth += len(o.Text)
-		if row == -1 || textWidth > 30 {
+		if cnt == 0 || cnt == 3 {
 			row++
 			buttonrows = append(buttonrows, make([]tgbotapi.InlineKeyboardButton, 0))
 		}
 		label := fmt.Sprintf("%s (%d)", o.Text, votesForOption[o.ID])
 		callback := fmt.Sprintf("%d:%d", p.ID, o.ID)
 		button := tgbotapi.NewInlineKeyboardButtonData(label, callback)
+		cnt++
 		buttonrows[row] = append(buttonrows[row], button)
 	}
 	markup := tgbotapi.NewInlineKeyboardMarkup(buttonrows...)
@@ -139,7 +140,7 @@ func buildPollListing(p *poll, st Store) (listing string) {
 		for _, a := range p.Answers {
 			if a.OptionID == o.ID {
 				votesForOption[o.ID]++
-				u, err := st.GetUser(a.UserID)
+				u, err := st.GetUser(a.UserID, 0)
 				if err != nil {
 					log.Printf("could not get user: %v", err)
 					listOfUsers[i] = append(listOfUsers[i], &tgbotapi.User{ID: a.UserID})

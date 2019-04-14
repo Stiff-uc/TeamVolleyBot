@@ -9,7 +9,7 @@ var (
 	locCreateNewPoll        = "create new poll"
 	locInlineInsertPoll     = "insert poll into chat"
 	locSharePoll            = "share poll"
-	locNewQuestion          = "Great! Send raid description, please."
+	locNewQuestion          = "Great! Send game description, please."
 	locEditQuestion         = "Okay, just send the new question, please."
 	locEditQuestionButton   = "change question"
 	locAddOption            = "Alright, send options that you want to add to the poll, please."

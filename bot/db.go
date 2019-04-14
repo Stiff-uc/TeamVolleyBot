@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 type sqlStore struct {
@@ -76,17 +76,28 @@ func newSQLStore(databaseFile string) *sqlStore {
 		PollId INTEGER,
 		state INTEGER);
 	CREATE TABLE IF NOT EXISTS user(
-		ID INTEGER PRIMARY KEY,
+		ID INTEGER,
+		chatId integer,
 		FirstName TEXT,
 		LastName Text,
 		LastSaved INTEGER,
 		CreatedAt INTEGER,
-		UserName TEXT);
+		UserName TEXT,
+		PRIMARY KEY (ID, chatId));
+	CREATE TABLE IF NOT EXISTS chat(
+		ID integer primary key,
+		TITLE text,
+		Status text,
+		LastSaved INTEGER,
+		CreatedAt INTEGER,
+		adminUserId integer		
+	);
 
 	CREATE INDEX IF NOT EXISTS poll_index ON poll(ID);
 	CREATE INDEX IF NOT EXISTS pollmsg_index ON pollmsg(MessageID);
 	CREATE INDEX IF NOT EXISTS answer_index ON answer(PollID);
 	CREATE INDEX IF NOT EXISTS option_index ON option(PollID);
+	CREATE INDEX IF NOT EXISTS chat_index on chat(ID);
 	`
 
 	if _, err := st.db.Exec(schema); err != nil {
@@ -96,10 +107,10 @@ func newSQLStore(databaseFile string) *sqlStore {
 	return st
 }
 
-func (st *sqlStore) GetUser(userid int) (*tgbotapi.User, error) {
+func (st *sqlStore) GetUser(userid int, chatID int64) (*tgbotapi.User, error) {
 	u := &tgbotapi.User{ID: userid}
 
-	row := st.db.QueryRow("SELECT FirstName, LastName, UserName FROM user WHERE ID = ?", userid)
+	row := st.db.QueryRow("SELECT FirstName, LastName, UserName FROM user WHERE ID = ? and chatId = ?", userid, chatID)
 	if err := row.Scan(&u.FirstName, &u.LastName, &u.UserName); err != nil {
 		return u, fmt.Errorf(`could not scan user "%d": %v`, u.ID, err)
 	}
@@ -337,7 +348,13 @@ func (st *sqlStore) SaveAnswer(p *poll, a answer) (unvoted bool, err error) {
 		}
 		err = tx.Commit()
 	}()
-
+	optIndex := 0
+	for i, opt := range p.Options {
+		if a.OptionID == opt.ID {
+			optIndex = i
+		}
+	}
+	log.Printf("Vote index = %d", optIndex)
 	// find previous votes in this poll
 	stmt, err := tx.Prepare("SELECT OptionID FROM answer WHERE PollID = ? AND UserID = ?")
 	if err != nil {
@@ -384,29 +401,43 @@ func (st *sqlStore) SaveAnswer(p *poll, a answer) (unvoted bool, err error) {
 			return true, nil
 		}
 
-		if !isMultipleChoice(p) {
-
+		if optIndex <= 2 {
+			// switch team
 			// decrement previously selected option(s)
 			stmt, err = tx.Prepare("UPDATE option SET Ctr = Ctr - 1 WHERE ID = ? AND Ctr > 0")
 			if err != nil {
 				return false, fmt.Errorf("could not prepare sql statement: %v", err)
 			}
-			for _, o := range prevOpts {
-				if _, err = stmt.Exec(o); err != nil {
-					return false, fmt.Errorf("could not decrement option: %v", err)
+			for i := 0; i <= 2; i++ {
+				if contains(prevOpts, p.Options[i].ID) {
+					if _, err = stmt.Exec(p.Options[i].ID); err != nil {
+						return false, fmt.Errorf("could not decrement option: %v", err)
+					}
 				}
 			}
-
-			// update answer
-			stmt, err = tx.Prepare("UPDATE answer SET OptionID = ?, LastSaved = ? WHERE UserID = ? AND PollID = ?")
+			// remove previous votes
+			stmt, err = tx.Prepare("delete from answer where optionId = ? and userId=? and pollId=?")
 			if err != nil {
 				return false, fmt.Errorf("could not prepare sql statement: %v", err)
 			}
-			_, err = stmt.Exec(a.OptionID, time.Now().UTC().Unix(), a.UserID, a.PollID)
+			for i := 0; i <= 2; i++ {
+				if contains(prevOpts, p.Options[i].ID) {
+					if _, err = stmt.Exec(p.Options[i].ID, a.UserID, a.PollID); err != nil {
+						return false, fmt.Errorf("could not decrement option: %v", err)
+					}
+				}
+			}
+			// update answer
+			stmt, err = tx.Prepare("INSERT INTO answer(PollID, OptionID, UserID, LastSaved, CreatedAt) values(?, ?, ?, ?, ?)")
+			if err != nil {
+				return false, fmt.Errorf("could not prepare sql statement: %v", err)
+			}
+			_, err = stmt.Exec(a.PollID, a.OptionID, a.UserID, time.Now().UTC().Unix(), time.Now().UTC().Unix())
 			if err != nil {
 				return false, fmt.Errorf("could not update vote: %v", err)
 			}
 		} else {
+			// toggle additional options
 			// new vote
 			stmt, err = tx.Prepare("INSERT INTO answer(PollID, OptionID, UserID, LastSaved, CreatedAt) values(?, ?, ?, ?, ?)")
 			if err != nil {
@@ -417,6 +448,40 @@ func (st *sqlStore) SaveAnswer(p *poll, a answer) (unvoted bool, err error) {
 				return false, fmt.Errorf("could not insert answer: %v", err)
 			}
 		}
+
+		// if !isMultipleChoice(p) {
+
+		// 	// decrement previously selected option(s)
+		// 	stmt, err = tx.Prepare("UPDATE option SET Ctr = Ctr - 1 WHERE ID = ? AND Ctr > 0")
+		// 	if err != nil {
+		// 		return false, fmt.Errorf("could not prepare sql statement: %v", err)
+		// 	}
+		// 	for _, o := range prevOpts {
+		// 		if _, err = stmt.Exec(o); err != nil {
+		// 			return false, fmt.Errorf("could not decrement option: %v", err)
+		// 		}
+		// 	}
+
+		// 	// update answer
+		// 	stmt, err = tx.Prepare("UPDATE answer SET OptionID = ?, LastSaved = ? WHERE UserID = ? AND PollID = ?")
+		// 	if err != nil {
+		// 		return false, fmt.Errorf("could not prepare sql statement: %v", err)
+		// 	}
+		// 	_, err = stmt.Exec(a.OptionID, time.Now().UTC().Unix(), a.UserID, a.PollID)
+		// 	if err != nil {
+		// 		return false, fmt.Errorf("could not update vote: %v", err)
+		// 	}
+		// } else {
+		// 	// new vote
+		// 	stmt, err = tx.Prepare("INSERT INTO answer(PollID, OptionID, UserID, LastSaved, CreatedAt) values(?, ?, ?, ?, ?)")
+		// 	if err != nil {
+		// 		return false, fmt.Errorf("could not prepare sql statement: %v", err)
+		// 	}
+		// 	_, err = stmt.Exec(a.PollID, a.OptionID, a.UserID, time.Now().UTC().Unix(), time.Now().UTC().Unix())
+		// 	if err != nil {
+		// 		return false, fmt.Errorf("could not insert answer: %v", err)
+		// 	}
+		// }
 	} else {
 		// new vote
 		stmt, err = tx.Prepare("INSERT INTO answer(PollID, OptionID, UserID, LastSaved, CreatedAt) values(?, ?, ?, ?, ?)")
@@ -571,7 +636,7 @@ func (st *sqlStore) SaveOptions(options []option) error {
 	return nil
 }
 
-func (st *sqlStore) SaveUser(u *tgbotapi.User) error {
+func (st *sqlStore) SaveUser(u *tgbotapi.User, chatID int64) error {
 	tx, err := st.db.Begin()
 	if err != nil {
 		return fmt.Errorf("could not begin database transaction: %v", err)
@@ -586,36 +651,192 @@ func (st *sqlStore) SaveUser(u *tgbotapi.User) error {
 		err = tx.Commit()
 	}()
 
-	stmt, err := tx.Prepare("SELECT count(1) FROM user WHERE ID = ?")
+	stmt, err := tx.Prepare("SELECT count(1) FROM user WHERE ID = ? and chatId = ?")
 	if err != nil {
 		return fmt.Errorf("could not prepare sql statement: %v", err)
 	}
 	defer close(stmt)
 
 	var cnt int
-	err = stmt.QueryRow(u.ID).Scan(&cnt)
+	err = stmt.QueryRow(u.ID, chatID).Scan(&cnt)
 	if err != nil {
 		return fmt.Errorf("could not check if user '%s' exists: %v", u.UserName, err)
 	}
 	if cnt != 0 {
-		stmt, err = tx.Prepare("UPDATE user SET FirstName = ?, LastName = ?, UserName = ?, LastSaved = ? WHERE ID = ?")
+		stmt, err = tx.Prepare("UPDATE user SET FirstName = ?, LastName = ?, UserName = ?, LastSaved = ? WHERE ID = ? and chatId = ?")
 		if err != nil {
 			return fmt.Errorf("could not prepare sql statement: %v", err)
 		}
-		_, err = stmt.Exec(u.FirstName, u.LastName, u.UserName, time.Now().UTC().Unix(), u.ID)
+		_, err = stmt.Exec(u.FirstName, u.LastName, u.UserName, time.Now().UTC().Unix(), u.ID, chatID)
 		if err != nil {
 			return fmt.Errorf("could not update user entry: %v", err)
 		}
 		return nil
 	}
 
-	stmt, err = tx.Prepare("INSERT INTO user(ID, FirstName, LastName, UserName, LastSaved, CreatedAt) values(?, ?, ?, ?, ?, ?)")
+	stmt, err = tx.Prepare("INSERT INTO user(ID, chatId, FirstName, LastName, UserName, LastSaved, CreatedAt) values(?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("could not prepare sql insert statement: %v", err)
 	}
 	defer close(stmt)
 
-	_, err = stmt.Exec(u.ID, u.FirstName, u.LastName, u.UserName, time.Now().UTC().Unix(), time.Now().UTC().Unix())
+	_, err = stmt.Exec(u.ID, chatID, u.FirstName, u.LastName, u.UserName, time.Now().UTC().Unix(), time.Now().UTC().Unix())
+	if err != nil {
+		return fmt.Errorf("could not execute sql insert statement: %v", err)
+	}
+
+	return nil
+}
+
+func (st *sqlStore) SaveChat(c *tgbotapi.Chat) error {
+	tx, err := st.db.Begin()
+	if err != nil {
+		return fmt.Errorf("could not begin database transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			if err := tx.Rollback(); err != nil {
+				log.Printf("could not rollback database change: %v", err)
+			}
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	stmt, err := tx.Prepare("SELECT count(1) FROM chat WHERE ID = ?")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql statement: %v", err)
+	}
+	defer close(stmt)
+
+	var cnt int
+	err = stmt.QueryRow(c.ID).Scan(&cnt)
+	if err != nil {
+		return fmt.Errorf("could not check if chat '%s' exists: %v", c.Title, err)
+	}
+	if cnt != 0 {
+		stmt, err = tx.Prepare("UPDATE chat SET TITLE = ?, LastSaved = ? WHERE ID = ? ")
+		if err != nil {
+			return fmt.Errorf("could not prepare sql statement: %v", err)
+		}
+		_, err = stmt.Exec(c.Title, time.Now().UTC().Unix(), c.ID)
+		if err != nil {
+			return fmt.Errorf("could not update user entry: %v", err)
+		}
+		return nil
+	}
+
+	stmt, err = tx.Prepare("INSERT INTO chat(ID, title, status, LastSaved, CreatedAt) values(?, ?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql insert statement: %v", err)
+	}
+	defer close(stmt)
+
+	_, err = stmt.Exec(c.ID, c.Title, "Active", time.Now().UTC().Unix(), time.Now().UTC().Unix())
+	if err != nil {
+		return fmt.Errorf("could not execute sql insert statement: %v", err)
+	}
+
+	return nil
+}
+
+func (st *sqlStore) EnterChat(c *tgbotapi.Chat, userID int) error {
+	tx, err := st.db.Begin()
+	if err != nil {
+		return fmt.Errorf("could not begin database transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			if err := tx.Rollback(); err != nil {
+				log.Printf("could not rollback database change: %v", err)
+			}
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	stmt, err := tx.Prepare("SELECT count(1) FROM chat WHERE ID = ?")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql statement: %v", err)
+	}
+	defer close(stmt)
+
+	var cnt int
+	err = stmt.QueryRow(c.ID).Scan(&cnt)
+	if err != nil {
+		return fmt.Errorf("could not check if chat '%s' exists: %v", c.Title, err)
+	}
+	if cnt != 0 {
+		stmt, err = tx.Prepare("UPDATE chat SET TITLE = ?, status = ?, adminUserId = ?, LastSaved = ? WHERE ID = ? ")
+		if err != nil {
+			return fmt.Errorf("could not prepare sql statement: %v", err)
+		}
+		_, err = stmt.Exec(c.Title, "Active", userID, time.Now().UTC().Unix(), c.ID)
+		if err != nil {
+			return fmt.Errorf("could not update user entry: %v", err)
+		}
+		return nil
+	}
+
+	stmt, err = tx.Prepare("INSERT INTO chat(ID, title, status, LastSaved, CreatedAt, adminUserId) values(?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql insert statement: %v", err)
+	}
+	defer close(stmt)
+
+	_, err = stmt.Exec(c.ID, c.Title, "Active", time.Now().UTC().Unix(), time.Now().UTC().Unix(), userID)
+	if err != nil {
+		return fmt.Errorf("could not execute sql insert statement: %v", err)
+	}
+
+	return nil
+}
+
+func (st *sqlStore) LeaveChat(c *tgbotapi.Chat) error {
+	tx, err := st.db.Begin()
+	if err != nil {
+		return fmt.Errorf("could not begin database transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			if err := tx.Rollback(); err != nil {
+				log.Printf("could not rollback database change: %v", err)
+			}
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	stmt, err := tx.Prepare("SELECT count(1) FROM chat WHERE ID = ?")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql statement: %v", err)
+	}
+	defer close(stmt)
+
+	var cnt int
+	err = stmt.QueryRow(c.ID).Scan(&cnt)
+	if err != nil {
+		return fmt.Errorf("could not check if chat '%s' exists: %v", c.Title, err)
+	}
+	if cnt != 0 {
+		stmt, err = tx.Prepare("UPDATE chat SET TITLE = ?, status = ?, LastSaved = ? WHERE ID = ? ")
+		if err != nil {
+			return fmt.Errorf("could not prepare sql statement: %v", err)
+		}
+		_, err = stmt.Exec(c.Title, "Inactive", time.Now().UTC().Unix(), c.ID)
+		if err != nil {
+			return fmt.Errorf("could not update user entry: %v", err)
+		}
+		return nil
+	}
+
+	stmt, err = tx.Prepare("INSERT INTO chat(ID, title, status, LastSaved, CreatedAt) values(?, ?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql insert statement: %v", err)
+	}
+	defer close(stmt)
+
+	_, err = stmt.Exec(c.ID, c.Title, "Inactive", time.Now().UTC().Unix(), time.Now().UTC().Unix())
 	if err != nil {
 		return fmt.Errorf("could not execute sql insert statement: %v", err)
 	}
