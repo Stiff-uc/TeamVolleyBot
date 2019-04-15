@@ -243,7 +243,7 @@ func handleSelectChatQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Stor
 	if len(splits) < 2 {
 		return fmt.Errorf("query did not contain the chatId")
 	}
-	newChatID, err := strconv.ParseInt(splits[1], 10, 32)
+	newChatID, err := strconv.ParseInt(splits[1], 10, 64)
 	if err != nil {
 		return fmt.Errorf("could not convert string payload to int: %v", err)
 	}

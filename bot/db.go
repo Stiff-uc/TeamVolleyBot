@@ -87,7 +87,7 @@ func newSQLStore(databaseFile string) *sqlStore {
 		UserName TEXT,
 		PRIMARY KEY (ID, chatId));
 	CREATE TABLE IF NOT EXISTS chat(
-		ID integer primary key,
+		ID numeric primary key,
 		TITLE text,
 		Status text,
 		LastSaved INTEGER,
