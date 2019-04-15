@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -105,8 +106,8 @@ func run() error {
 				log.Printf("Could not update poll #%d: %v", pollid, err)
 			}
 		case update := <-updates:
-			// s, _ := json.MarshalIndent(update, "", "\t")
-			// log.Printf("Message:\n %s ", s)
+			s, _ := json.MarshalIndent(update, "", "\t")
+			log.Printf("Message:\n %s ", s)
 
 			stopTimer := newTimer()
 			defer stopTimer()
@@ -152,7 +153,6 @@ func run() error {
 			if update.CallbackQuery != nil {
 				log.Printf("CallbackQuery from [%s]: %s", update.CallbackQuery.From.UserName, update.CallbackQuery.Data)
 
-				err = st.SaveUser(update.CallbackQuery.From, 0)
 				if err != nil {
 					log.Printf("could not save user: %v", err)
 				}

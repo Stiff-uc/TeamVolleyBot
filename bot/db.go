@@ -46,6 +46,7 @@ func newSQLStore(databaseFile string) *sqlStore {
 	CREATE TABLE IF NOT EXISTS poll(
 		ID INTEGER PRIMARY KEY ASC,
 		UserID INTEGER,
+		ChatID INTEGER,
 		LastSaved INTEGER,
 		CreatedAt INTEGER,
 		Type INTEGER,
@@ -74,6 +75,7 @@ func newSQLStore(databaseFile string) *sqlStore {
 	CREATE TABLE IF NOT EXISTS dialog(
 		UserID INTEGER PRIMARY KEY,
 		PollId INTEGER,
+		ChatId INTEGER,
 		state INTEGER);
 	CREATE TABLE IF NOT EXISTS user(
 		ID INTEGER,
@@ -121,8 +123,8 @@ func (st *sqlStore) GetUser(userid int, chatID int64) (*tgbotapi.User, error) {
 func (st *sqlStore) GetPoll(pollid int) (*poll, error) {
 	p := &poll{ID: pollid}
 	var err error
-	row := st.db.QueryRow("SELECT UserID, Question, Inactive, Type FROM poll WHERE ID = ?", pollid)
-	if err := row.Scan(&p.UserID, &p.Question, &p.Inactive, &p.Type); err != nil {
+	row := st.db.QueryRow("SELECT UserID, ChatId, Question, Inactive, Type FROM poll WHERE ID = ?", pollid)
+	if err := row.Scan(&p.UserID, &p.ChatID, &p.Question, &p.Inactive, &p.Type); err != nil {
 		return p, fmt.Errorf("could not scan poll #%d: %v", p.ID, err)
 	}
 
@@ -142,8 +144,8 @@ func (st *sqlStore) GetPoll(pollid int) (*poll, error) {
 func (st *sqlStore) GetPollNewer(pollid int, userid int) (*poll, error) {
 	p := &poll{}
 	var err error
-	row := st.db.QueryRow("SELECT UserID, ID, Question, Inactive, Type FROM poll WHERE ID > ? AND UserID = ? ORDER BY ID ASC LIMIT 1", pollid, userid)
-	if err := row.Scan(&p.UserID, &p.ID, &p.Question, &p.Inactive, &p.Type); err != nil {
+	row := st.db.QueryRow("SELECT UserID, ID, ChatID, Question, Inactive, Type FROM poll WHERE ID > ? AND UserID = ? ORDER BY ID ASC LIMIT 1", pollid, userid)
+	if err := row.Scan(&p.UserID, &p.ID, &p.ChatID, &p.Question, &p.Inactive, &p.Type); err != nil {
 		return p, fmt.Errorf("could not scan poll #%d: %v", p.ID, err)
 	}
 
@@ -163,8 +165,8 @@ func (st *sqlStore) GetPollNewer(pollid int, userid int) (*poll, error) {
 func (st *sqlStore) GetPollOlder(pollid int, userid int) (*poll, error) {
 	p := &poll{}
 	var err error
-	row := st.db.QueryRow("SELECT UserID, ID, Question, Inactive, Type FROM poll WHERE ID < ? AND UserID = ? ORDER BY ID DESC LIMIT 1", pollid, userid)
-	if err := row.Scan(&p.UserID, &p.ID, &p.Question, &p.Inactive, &p.Type); err != nil {
+	row := st.db.QueryRow("SELECT UserID, ID, ChatID,Question, Inactive, Type FROM poll WHERE ID < ? AND UserID = ? ORDER BY ID DESC LIMIT 1", pollid, userid)
+	if err := row.Scan(&p.UserID, &p.ID, &p.ChatID, &p.Question, &p.Inactive, &p.Type); err != nil {
 		return p, fmt.Errorf("could not scan poll #%d: %v", p.ID, err)
 	}
 
@@ -181,22 +183,22 @@ func (st *sqlStore) GetPollOlder(pollid int, userid int) (*poll, error) {
 	return p, nil
 }
 
-func (st *sqlStore) GetState(userid int) (state int, pollid int, err error) {
-	row := st.db.QueryRow("SELECT state, pollid FROM dialog WHERE UserID = ?", userid)
-	if err := row.Scan(&state, &pollid); err != nil {
-		return state, pollid, fmt.Errorf("could not scan state from row: %v", err)
+func (st *sqlStore) GetState(userid int) (state int, pollid int, chatID int64, err error) {
+	row := st.db.QueryRow("SELECT state, pollid, chatId FROM dialog WHERE UserID = ?", userid)
+	if err := row.Scan(&state, &pollid, &chatID); err != nil {
+		return state, pollid, chatID, fmt.Errorf("could not scan state from row: %v", err)
 	}
-	return state, pollid, nil
+	return state, pollid, chatID, nil
 }
 
-func (st *sqlStore) SaveState(userid int, pollid int, state int) (err error) {
-	res, err := st.db.Exec("UPDATE dialog SET state = ? WHERE UserID = ?", userid, state)
+func (st *sqlStore) SaveState(userid int, pollid int, state int, chatID int64) (err error) {
+	res, err := st.db.Exec("UPDATE dialog SET state = ?, chatId = ? WHERE UserID = ?", state, chatID, userid)
 	if err != nil {
 		return fmt.Errorf("could not update state in database: %v", err)
 	}
 
 	if aff, err := res.RowsAffected(); aff == 0 || err != nil {
-		_, err = st.db.Exec("INSERT OR REPLACE INTO dialog(UserID, pollid, state) values(?, ?, ?)", userid, pollid, state)
+		_, err = st.db.Exec("INSERT OR REPLACE INTO dialog(UserID, pollid, state, chatId) values(?, ?, ?, ?)", userid, pollid, state, chatID)
 		if err != nil {
 			return fmt.Errorf("could not insert or replace state database entry: %v", err)
 		}
@@ -209,14 +211,14 @@ func (st *sqlStore) GetPollsByUser(userid int) ([]*poll, error) {
 	polls := make([]*poll, 0)
 	var err error
 
-	row, err := st.db.Query("SELECT ID, UserID, Question, Inactive, Type FROM poll WHERE UserID = ? ORDER BY ID DESC LIMIT 3", userid)
+	row, err := st.db.Query("SELECT ID, UserID, ChatID, Question, Inactive, Type FROM poll WHERE UserID = ? ORDER BY ID DESC LIMIT 3", userid)
 	if err != nil {
 		return polls, fmt.Errorf("could not query polls for userid #%d: %v", userid, err)
 	}
 
 	for row.Next() {
 		p := &poll{UserID: userid}
-		if err := row.Scan(&p.ID, &p.UserID, &p.Question, &p.Inactive, &p.Type); err != nil {
+		if err := row.Scan(&p.ID, &p.UserID, &p.ChatID, &p.Question, &p.Inactive, &p.Type); err != nil {
 			return polls, fmt.Errorf("could not scan poll for userid #%d: %v", userid, err)
 		}
 		p.Options, err = st.GetOptions(p.ID)
@@ -861,26 +863,26 @@ func (st *sqlStore) SavePoll(p *poll) (id int, err error) {
 
 	if p.ID != 0 {
 		var stmt *sql.Stmt
-		stmt, err = tx.Prepare("UPDATE poll SET UserID = ?, Question = ?, Inactive = ?, Private = ?, Type = ?, LastSaved = ?, CreatedAt = ? WHERE ID = ?")
+		stmt, err = tx.Prepare("UPDATE poll SET UserID = ?, ChatID = ?,Question = ?, Inactive = ?, Private = ?, Type = ?, LastSaved = ?, CreatedAt = ? WHERE ID = ?")
 		if err != nil {
 			return id, fmt.Errorf("could not prepare sql statement: %v", err)
 		}
 		defer close(stmt)
-		_, err = stmt.Exec(p.UserID, p.Question, p.Inactive, p.Private, p.Type, time.Now().UTC().Unix(), time.Now().UTC().Unix(), p.ID)
+		_, err = stmt.Exec(p.UserID, p.ChatID, p.Question, p.Inactive, p.Private, p.Type, time.Now().UTC().Unix(), time.Now().UTC().Unix(), p.ID)
 		if err != nil {
 			return id, fmt.Errorf("could not update user entry: %v", err)
 		}
 		return id, nil
 	}
 
-	stmt, err := tx.Prepare("INSERT INTO poll(UserID, Question, Inactive, Private, Type, LastSaved, CreatedAt) values(?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := tx.Prepare("INSERT INTO poll(UserID, ChatID, Question, Inactive, Private, Type, LastSaved, CreatedAt) values(?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return id, fmt.Errorf("could not prepare sql insert statement: %v", err)
 	}
 	defer close(stmt)
 
 	var res sql.Result
-	res, err = stmt.Exec(p.UserID, p.Question, p.Inactive, p.Private, p.Type, time.Now().UTC().Unix(), time.Now().UTC().Unix())
+	res, err = stmt.Exec(p.UserID, p.ChatID, p.Question, p.Inactive, p.Private, p.Type, time.Now().UTC().Unix(), time.Now().UTC().Unix())
 	if err != nil {
 		return id, fmt.Errorf("could not execute sql insert statement: %v", err)
 	}
@@ -892,6 +894,23 @@ func (st *sqlStore) SavePoll(p *poll) (id int, err error) {
 	id = int(id64)
 
 	return id, nil
+}
+
+func (st *sqlStore) GetUserChatIds(userID int) (chats []chat, err error) {
+	chats = []chat{}
+	//select chatID from user where id=? and chatID<0 order by lastsaved desc limit 5
+	row, err := st.db.Query("select c.id, c.title, c.status, c.adminUserId from user u inner join chat c on (u.chatId=c.id)	where u.id=? and u.chatID<0 order by c.lastsaved desc limit 5", userID)
+
+	for row.Next() {
+		chat := &chat{}
+		if err := row.Scan(&chat.ID, &chat.Title, &chat.Status, &chat.Status); err != nil {
+			return nil, fmt.Errorf(`could not scan user chats "%d": %v`, userID, err)
+		}
+		chats = append(chats, *chat)
+		log.Printf("Add chat = %d", chat.ID)
+	}
+
+	return chats, nil
 }
 
 func contains(slice []int, n int) bool {

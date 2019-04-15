@@ -42,6 +42,23 @@ func sendMainMenuMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) (tgbotapi
 	return bot.Send(msg)
 }
 
+func sendListChatsMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
+	chats, err := st.GetUserChatIds(update.Message.From.ID)
+	if err != nil {
+		return err
+	}
+	buttons := make([]tgbotapi.InlineKeyboardButton, 0)
+	for _, chat := range chats {
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s", chat.Title), fmt.Sprintf("chat:%d", chat.ID)))
+	}
+	markup := tgbotapi.NewInlineKeyboardMarkup(buttons)
+	messageTxt := locChatsListMessage
+	msg := tgbotapi.NewMessage(int64(update.Message.From.ID), messageTxt)
+	msg.ReplyMarkup = markup
+	bot.Send(msg)
+	return nil
+}
+
 func sendInterMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update, p *poll) (tgbotapi.Message, error) {
 	//shareButton := tgbotapi.InlineKeyboardButton{
 	//Text:              locSharePoll,
@@ -73,8 +90,12 @@ func sendNewQuestionMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Sto
 	if err != nil {
 		return fmt.Errorf("could not send message: %v", err)
 	}
-
-	err = st.SaveState(update.CallbackQuery.From.ID, -1, waitingForQuestion)
+	state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+	if err != nil {
+		chatID = -1
+	}
+	state = waitingForQuestion
+	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID)
 	if err != nil {
 		return fmt.Errorf("could not change state to waiting for questions: %v", err)
 	}
@@ -140,7 +161,7 @@ func buildPollListing(p *poll, st Store) (listing string) {
 		for _, a := range p.Answers {
 			if a.OptionID == o.ID {
 				votesForOption[o.ID]++
-				u, err := st.GetUser(a.UserID, 0)
+				u, err := st.GetUser(a.UserID, p.ChatID)
 				if err != nil {
 					log.Printf("could not get user: %v", err)
 					listOfUsers[i] = append(listOfUsers[i], &tgbotapi.User{ID: a.UserID})

@@ -3,7 +3,7 @@ package main
 const createNewPollQuery = "createNewPoll"
 const createPollQuery = "createpoll"
 const pollDoneQuery = "polldone"
-
+const selectChat = "chat"
 const (
 	ohHi = iota
 	waitingForQuestion
@@ -12,6 +12,9 @@ const (
 	editPoll
 	editQuestion
 	addOption
+	listChats
+	listPlayers
+	addPlayerHint
 )
 
 const (

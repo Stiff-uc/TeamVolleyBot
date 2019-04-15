@@ -1,13 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 func handleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
@@ -33,6 +34,10 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 
 	if strings.Contains(update.CallbackQuery.Data, pollDoneQuery) {
 		return handlePollDoneQuery(bot, update, st)
+	}
+
+	if strings.Contains(update.CallbackQuery.Data, selectChat) {
+		return handleSelectChatQuery(bot, update, st)
 	}
 
 	pollid, optionid, err := parseQueryPayload(update)
@@ -75,6 +80,8 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 	if err != nil {
 		return fmt.Errorf("could not get poll: %v", err)
 	}
+
+	err = st.SaveUser(update.CallbackQuery.From, p.ChatID)
 
 	var choice option
 	for _, o := range p.Options {
@@ -159,7 +166,11 @@ func updatePollMessages(bot *tgbotapi.BotAPI, pollid int, st Store) error {
 	for _, msg := range msgs {
 		ed.Text = listing
 		ed.InlineMessageID = msg.InlineMessageID
-		_, err := bot.Send(ed)
+		x, err := bot.Send(ed)
+
+		s, _ := json.MarshalIndent(x, "", "\t")
+		log.Printf("APIReturn:\n %s ", s)
+
 		if err != nil {
 			if strings.Contains(err.Error(), "MESSAGE_ID_INVALID") {
 				log.Printf("Remove inline message %s\n", msg.InlineMessageID)
@@ -215,7 +226,35 @@ func handlePollDoneQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 	if err != nil {
 		return fmt.Errorf("could not post finished poll: %v", err)
 	}
-	err = st.SaveState(update.CallbackQuery.From.ID, p.ID, pollDone)
+	state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+	if err != nil {
+		chatID = -1
+	}
+	state = pollDone
+	err = st.SaveState(update.CallbackQuery.From.ID, p.ID, state, chatID)
+	if err != nil {
+		return fmt.Errorf("could not change state to poll done: %v", err)
+	}
+	return nil
+}
+
+func handleSelectChatQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
+	splits := strings.Split(update.CallbackQuery.Data, ":")
+	if len(splits) < 2 {
+		return fmt.Errorf("query did not contain the chatId")
+	}
+	newChatID, err := strconv.ParseInt(splits[1], 10, 32)
+	if err != nil {
+		return fmt.Errorf("could not convert string payload to int: %v", err)
+	}
+
+	state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+	if err != nil {
+		chatID = -1
+	}
+	state = pollDone
+	chatID = newChatID
+	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID)
 	if err != nil {
 		return fmt.Errorf("could not change state to poll done: %v", err)
 	}
@@ -264,8 +303,13 @@ func handlePollEditQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 		}
 		toggleMultipleChoice = true
 	case "o":
-		state := waitingForOption
-		err = st.SaveState(update.CallbackQuery.From.ID, pollid, state)
+		state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+		if err != nil {
+			chatID = -1
+		}
+		state = waitingForOption
+
+		err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}
@@ -277,8 +321,13 @@ func handlePollEditQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 		}
 		return nil
 	case "q":
-		state := editQuestion
-		err = st.SaveState(update.CallbackQuery.From.ID, pollid, state)
+
+		state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+		if err != nil {
+			chatID = -1
+		}
+		state = editQuestion
+		err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}

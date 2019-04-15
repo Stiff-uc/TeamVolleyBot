@@ -25,6 +25,7 @@ var (
 	locToggleOpen           = "close poll"
 	locToggleSingleChoice   = "set multiple choice"
 	locToggleMultipleChoice = "set single choice"
+	locChatsListMessage     = "Select the chat you're added this bot to. This will be poll's and users primary chat"
 	locAddedOption          = fmt.Sprintf(
 		"You can add more options by sending messages each containing one option. If you are done, please push the %s button.\n\nPreview:\n",
 		locPollDoneButton)

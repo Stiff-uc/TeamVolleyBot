@@ -5,14 +5,13 @@ import (
 	"log"
 	"strings"
 
-	"github.com/kyokomi/emoji"
-
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
 	state := ohHi
 	pollid := -1
+	chatID := int64(-1)
 	var err error
 
 	if strings.Contains(update.Message.Text, locAboutCommand) {
@@ -24,7 +23,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 		return err
 	}
 
-	state, pollid, err = st.GetState(update.Message.From.ID)
+	state, pollid, chatID, err = st.GetState(update.Message.From.ID)
 	if err != nil {
 		// could not retrieve state -> state is zero
 		state = ohHi
@@ -59,10 +58,26 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 
 	if strings.Contains(update.Message.Text, "/start") || pollid < 0 && state != waitingForQuestion {
 		state = ohHi
-		err = st.SaveState(update.Message.From.ID, pollid, state)
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}
+	}
+
+	if strings.Contains(update.Message.Text, "/chat") {
+		state = listChats
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID)
+		if err != nil {
+			return fmt.Errorf("could not save state: %v", err)
+		}
+	}
+
+	if state == listChats {
+		err = sendListChatsMessage(bot, update, st)
+		if err != nil {
+			return fmt.Errorf("could not send main menu message: %v", err)
+		}
+		return nil
 	}
 
 	if state == ohHi {
@@ -74,10 +89,19 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 	}
 
 	if state == waitingForQuestion {
+		// detect new user's default chat id
+		if chatID == -1 {
+			chats, err := st.GetUserChatIds(update.Message.From.ID)
+			if err == nil {
+				chatID = chats[0].ID
+			}
+		}
+
 		p := &poll{
 			Question: update.Message.Text,
 			UserID:   update.Message.From.ID,
 			Type:     1,
+			ChatID:   chatID,
 		}
 
 		pollid, err = st.SavePoll(p)
@@ -100,15 +124,15 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 		opts := []option{
 			option{
 				PollID: pollid,
-				Text:   emoji.Sprintf(":red_circle:"),
+				Text:   "Красные", //emoji.Sprintf(":red_circle:"),
 			}}
 		opts = append(opts, option{
 			PollID: pollid,
-			Text:   emoji.Sprintf(":white_circle:"), // "\U0001F7E2", // for green_cirlcle (not supported yet)
+			Text:   "Белые", //emoji.Sprintf(":white_circle:"), // "\U0001F7E2", // for green_cirlcle (not supported yet)
 		})
 		opts = append(opts, option{
 			PollID: pollid,
-			Text:   emoji.Sprintf(":blue_circle:"),
+			Text:   "Синие", // emoji.Sprintf(":blue_circle:"),
 		})
 		opts = append(opts, option{
 			PollID: pollid,
@@ -158,7 +182,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 		}
 
 		state = editPoll
-		err = st.SaveState(update.Message.From.ID, pollid, state)
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}
