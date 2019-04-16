@@ -75,8 +75,9 @@ func newSQLStore(databaseFile string) *sqlStore {
 	CREATE TABLE IF NOT EXISTS dialog(
 		UserID INTEGER PRIMARY KEY,
 		PollId INTEGER,
-		ChatId INTEGER,
-		state INTEGER);
+		ChatId INTEGER,		
+		state INTEGER,
+		UserContext INTEGER);
 	CREATE TABLE IF NOT EXISTS user(
 		ID INTEGER,
 		chatId integer,
@@ -195,22 +196,22 @@ func (st *sqlStore) GetPollOlder(pollid int, userid int) (*poll, error) {
 	return p, nil
 }
 
-func (st *sqlStore) GetState(userid int) (state int, pollid int, chatID int64, err error) {
-	row := st.db.QueryRow("SELECT state, pollid, chatId FROM dialog WHERE UserID = ?", userid)
-	if err := row.Scan(&state, &pollid, &chatID); err != nil {
-		return state, pollid, chatID, fmt.Errorf("could not scan state from row: %v", err)
+func (st *sqlStore) GetState(userid int) (state int, pollid int, chatID int64, userContext int, err error) {
+	row := st.db.QueryRow("SELECT state, pollid, chatId, userContext FROM dialog WHERE UserID = ?", userid)
+	if err := row.Scan(&state, &pollid, &chatID, &userContext); err != nil {
+		return state, pollid, chatID, userContext, fmt.Errorf("could not scan state from row: %v", err)
 	}
-	return state, pollid, chatID, nil
+	return state, pollid, chatID, userContext, nil
 }
 
-func (st *sqlStore) SaveState(userid int, pollid int, state int, chatID int64) (err error) {
-	res, err := st.db.Exec("UPDATE dialog SET state = ?, chatId = ? WHERE UserID = ?", state, chatID, userid)
+func (st *sqlStore) SaveState(userid int, pollid int, state int, chatID int64, userContext int) (err error) {
+	res, err := st.db.Exec("UPDATE dialog SET state = ?, chatId = ?, userContext = ? WHERE UserID = ?", state, chatID, userContext, userid)
 	if err != nil {
 		return fmt.Errorf("could not update state in database: %v", err)
 	}
 
 	if aff, err := res.RowsAffected(); aff == 0 || err != nil {
-		_, err = st.db.Exec("INSERT OR REPLACE INTO dialog(UserID, pollid, state, chatId) values(?, ?, ?, ?)", userid, pollid, state, chatID)
+		_, err = st.db.Exec("INSERT OR REPLACE INTO dialog(UserID, pollid, state, chatId, userContext) values(?, ?, ?, ?)", userid, pollid, state, chatID, userContext)
 		if err != nil {
 			return fmt.Errorf("could not insert or replace state database entry: %v", err)
 		}
@@ -961,7 +962,11 @@ func (st *sqlStore) GetUserChatIds(userID int) (chats []chat, err error) {
 func (st *sqlStore) GetChatUsers(chatID int64) (users []user, err error) {
 	users = []user{}
 
-	row, err := st.db.Query("select u.ID, u.FirstName, u.LastName, u.UserName, u.Priority, p.Tag, p.NameOverride from user u left outer join PlayerInfo p on (u.chatID=p.chatID and u.ID=p.UserID) where u.chatID = ? order by (u.Priority) desc, u.FirstName, u.LastName, UserName", chatID)
+	row, err := st.db.Query("select u.ID, u.FirstName, u.LastName, u.UserName, ifnull(u.Priority,0), ifnull(p.Tag,''), ifnull(p.NameOverride,'') from user u left outer join PlayerInfo p on (u.chatID=p.chatID and u.ID=p.UserID) where u.chatID = ? order by (u.Priority) desc, u.FirstName, u.LastName, UserName", chatID)
+	if err != nil {
+		log.Printf("Error getting chat %d user list: %v", chatID, err)
+		return users, err
+	}
 
 	for row.Next() {
 		user := &user{}
@@ -970,7 +975,7 @@ func (st *sqlStore) GetChatUsers(chatID int64) (users []user, err error) {
 		}
 		user.ChatID = chatID
 		users = append(users, *user)
-		log.Printf("Add chat = %d", user.ID)
+		// log.Printf("Add chat = %d", user.ID)
 	}
 
 	return users, err
@@ -1005,7 +1010,7 @@ func (st *sqlStore) SavePlayer(u user) error {
 	}()
 
 	var stmt *sql.Stmt
-	stmt, err = tx.Prepare("insert or update into PlayerInfo (ChatId, UserId, Tag, NameOverride) values (?, ?, ?, ?)")
+	stmt, err = tx.Prepare("insert or replace into PlayerInfo (ChatId, UserId, Tag, NameOverride) values (?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("could not prepare sql statement: %v", err)
 	}
@@ -1015,12 +1020,12 @@ func (st *sqlStore) SavePlayer(u user) error {
 		return fmt.Errorf("could not update player entry: %v", err)
 	}
 
-	stmt, err = tx.Prepare("insert or replace into user (ID, ChatID, Priority) values (?, ?, ?)")
+	stmt, err = tx.Prepare("insert or replace into user (ID, ChatID, FirstName, LastName, LastSaved, CreatedAt, UserName, Priority) values (?, ?, ?, ?, ?, (select createdAt from user where id= ? and chatId=?), ?, ?)")
 	if err != nil {
 		return fmt.Errorf("could not prepare sql statement: %v", err)
 	}
 	defer close(stmt)
-	_, err = stmt.Exec(u.ID, u.ChatID, u.Priority)
+	_, err = stmt.Exec(u.ID, u.ChatID, u.FirstName, u.LastName, time.Now().UTC().Unix(), u.ID, u.ChatID, u.UserName, u.Priority)
 	if err != nil {
 		return fmt.Errorf("could not update user entry: %v", err)
 	}

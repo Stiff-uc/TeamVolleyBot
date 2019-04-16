@@ -29,4 +29,7 @@ var (
 	locAddedOption          = fmt.Sprintf(
 		"You can add more options by sending messages each containing one option. If you are done, please push the %s button.\n\nPreview:\n",
 		locPollDoneButton)
+	locChangePriorityRequest = "Write new player's priority (i.e. -3, 10)"
+	locChangeNameRequest     = "Enter new player's name to override"
+	locChangeTagRequest      = "Enter new player's tag (can be an emoji or text)"
 )

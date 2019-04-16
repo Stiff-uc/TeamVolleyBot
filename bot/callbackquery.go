@@ -35,8 +35,24 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 		return handlePollDoneQuery(bot, update, st)
 	}
 
-	if strings.Contains(update.CallbackQuery.Data, selectChat) {
+	if strings.Contains(update.CallbackQuery.Data, selectChat+":") {
 		return handleSelectChatQuery(bot, update, st)
+	}
+
+	if strings.Contains(update.CallbackQuery.Data, selectPlayer+":") {
+		return handleSelectPlayerQuery(bot, update, st)
+	}
+
+	if strings.Contains(update.CallbackQuery.Data, updatePriority+":") {
+		return handleSelectPlayerPriority(bot, update, st)
+	}
+
+	if strings.Contains(update.CallbackQuery.Data, updatePlayerName+":") {
+		return handleSelectPlayerName(bot, update, st)
+	}
+
+	if strings.Contains(update.CallbackQuery.Data, updateTag+":") {
+		return handleSelectPlayerTag(bot, update, st)
 	}
 
 	pollid, optionid, err := parseQueryPayload(update)
@@ -222,12 +238,12 @@ func handlePollDoneQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 	if err != nil {
 		return fmt.Errorf("could not post finished poll: %v", err)
 	}
-	state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+	state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
 	if err != nil {
 		chatID = -1
 	}
 	state = pollDone
-	err = st.SaveState(update.CallbackQuery.From.ID, p.ID, state, chatID)
+	err = st.SaveState(update.CallbackQuery.From.ID, p.ID, state, chatID, userContext)
 	if err != nil {
 		return fmt.Errorf("could not change state to poll done: %v", err)
 	}
@@ -244,17 +260,141 @@ func handleSelectChatQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Stor
 		return fmt.Errorf("could not convert string payload to int: %v", err)
 	}
 
-	state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+	state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
 	if err != nil {
 		chatID = -1
 	}
-	state = pollDone
+	state = listPlayers
 	chatID = newChatID
-	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID)
+	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID, userContext)
 	if err != nil {
 		return fmt.Errorf("could not change state to poll done: %v", err)
 	}
-	return nil
+
+	return sendListUsersMessage(bot, update, st)
+
+}
+
+func handleSelectPlayerQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
+	splits := strings.Split(update.CallbackQuery.Data, ":")
+	if len(splits) < 3 {
+		return fmt.Errorf("query did not contain the player and chat ids")
+	}
+	newChatID, err := strconv.ParseInt(splits[2], 10, 64)
+	playerID, err := strconv.Atoi(splits[1])
+	if err != nil {
+		return fmt.Errorf("could not convert string payload to int: %v", err)
+	}
+
+	state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
+	if err != nil {
+		chatID = -1
+		userContext = -1
+	}
+	state = waitingForPlayerSettingSelect
+	chatID = newChatID
+	userContext = playerID
+	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID, userContext)
+	if err != nil {
+		return fmt.Errorf("could not change state to poll done: %v", err)
+	}
+	// send user menu
+	user, err := st.GetPlayer(userContext, chatID)
+	_, err = sendPlayerMessage(bot, update, user, update.CallbackQuery.From.ID)
+	return err
+}
+
+func handleSelectPlayerPriority(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
+	splits := strings.Split(update.CallbackQuery.Data, ":")
+	if len(splits) < 3 {
+		return fmt.Errorf("query did not contain the player and chat ids")
+	}
+	newChatID, err := strconv.ParseInt(splits[2], 10, 64)
+	playerID, err := strconv.Atoi(splits[1])
+	if err != nil {
+		return fmt.Errorf("could not convert string payload to int: %v", err)
+	}
+
+	state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
+	if err != nil {
+		chatID = -1
+		userContext = -1
+	}
+	state = waitingForPriority
+	chatID = newChatID
+	userContext = playerID
+	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID, userContext)
+	if err != nil {
+		return fmt.Errorf("could not change state to poll done: %v", err)
+	}
+	// send change priority request message
+
+	msg := tgbotapi.NewMessage(int64(update.CallbackQuery.From.ID), locChangePriorityRequest)
+	msg.ParseMode = tgbotapi.ModeHTML
+	_, err = bot.Send(&msg)
+	return err
+}
+
+func handleSelectPlayerName(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
+	splits := strings.Split(update.CallbackQuery.Data, ":")
+	if len(splits) < 3 {
+		return fmt.Errorf("query did not contain the player and chat ids")
+	}
+	newChatID, err := strconv.ParseInt(splits[2], 10, 64)
+	playerID, err := strconv.Atoi(splits[1])
+	if err != nil {
+		return fmt.Errorf("could not convert string payload to int: %v", err)
+	}
+
+	state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
+	if err != nil {
+		chatID = -1
+		userContext = -1
+	}
+	state = waitingForName
+	chatID = newChatID
+	userContext = playerID
+	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID, userContext)
+	if err != nil {
+		return fmt.Errorf("could not change state to poll done: %v", err)
+	}
+	// send change priority request message
+
+	msg := tgbotapi.NewMessage(int64(update.CallbackQuery.From.ID), locChangeNameRequest)
+	msg.ParseMode = tgbotapi.ModeHTML
+	_, err = bot.Send(&msg)
+	return err
+}
+
+func handleSelectPlayerTag(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
+	splits := strings.Split(update.CallbackQuery.Data, ":")
+	if len(splits) < 3 {
+		return fmt.Errorf("query did not contain the player and chat ids")
+	}
+	newChatID, err := strconv.ParseInt(splits[2], 10, 64)
+	playerID, err := strconv.Atoi(splits[1])
+	if err != nil {
+		return fmt.Errorf("could not convert string payload to int: %v", err)
+	}
+
+	state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
+	if err != nil {
+		chatID = -1
+		userContext = -1
+	}
+	state = waitingForTag
+	chatID = newChatID
+	userContext = playerID
+	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID, userContext)
+	if err != nil {
+		return fmt.Errorf("could not change state to poll done: %v", err)
+	}
+	// send change priority request message
+
+	msg := tgbotapi.NewMessage(int64(update.CallbackQuery.From.ID), locChangeTagRequest)
+	msg.ParseMode = tgbotapi.ModeHTML
+	_, err = bot.Send(&msg)
+	return err
 }
 
 func handlePollEditQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
@@ -299,13 +439,13 @@ func handlePollEditQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 		}
 		toggleMultipleChoice = true
 	case "o":
-		state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+		state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
 		if err != nil {
 			chatID = -1
 		}
 		state = waitingForOption
 
-		err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID)
+		err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID, userContext)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}
@@ -318,12 +458,12 @@ func handlePollEditQuery(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store)
 		return nil
 	case "q":
 
-		state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+		state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
 		if err != nil {
 			chatID = -1
 		}
 		state = editQuestion
-		err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID)
+		err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID, userContext)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}

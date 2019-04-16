@@ -17,8 +17,8 @@ type Store interface {
 	GetPollOlder(pollid int, userid int) (*poll, error)
 	GetAllPollMsg(pollid int) ([]pollident, error)
 	GetAllPollInlineMsg(pollid int) ([]pollident, error)
-	GetState(userid int) (state int, pollid int, chatID int64, err error)
-	SaveState(userid int, pollid int, state int, chatID int64) error
+	GetState(userid int) (state int, pollid int, chatID int64, userContext int, err error)
+	SaveState(userid int, pollid int, state int, chatID int64, userContext int) error
 	SaveUser(*tgbotapi.User, int64) error
 	SavePoll(*poll) (int, error)
 	SaveOptions([]option) error

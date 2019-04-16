@@ -44,16 +44,56 @@ func sendMainMenuMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) (tgbotapi
 
 func sendListChatsMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
 	chats, err := st.GetUserChatIds(update.Message.From.ID)
+	_, _, chatID, _, err := st.GetState(update.Message.From.ID)
 	if err != nil {
 		return err
 	}
-	buttons := make([]tgbotapi.InlineKeyboardButton, 0)
+	buttonrows := make([][]tgbotapi.InlineKeyboardButton, 0)
+
 	for _, chat := range chats {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s", chat.Title), fmt.Sprintf("chat:%d", chat.ID)))
+		buttonLabel := fmt.Sprintf("%s", chat.Title)
+		if chat.ID == chatID {
+			buttonLabel = "-> " + buttonLabel
+		}
+		buttons := make([]tgbotapi.InlineKeyboardButton, 0)
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(buttonLabel, fmt.Sprintf("chat:%d", chat.ID)))
+		buttonrows = append(buttonrows, buttons)
 	}
-	markup := tgbotapi.NewInlineKeyboardMarkup(buttons)
+	markup := tgbotapi.NewInlineKeyboardMarkup(buttonrows...)
 	messageTxt := locChatsListMessage
 	msg := tgbotapi.NewMessage(int64(update.Message.From.ID), messageTxt)
+	msg.ReplyMarkup = markup
+	bot.Send(msg)
+	return nil
+}
+
+func sendListUsersMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error {
+	_, _, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
+	users, err := st.GetChatUsers(chatID)
+	if err != nil {
+		return err
+	}
+	buttonrows := make([][]tgbotapi.InlineKeyboardButton, 0)
+	for _, user := range users {
+		u := tgbotapi.User{
+			ID:        user.ID,
+			FirstName: user.FirstName,
+			LastName:  user.LastName,
+			UserName:  user.UserName,
+		}
+		buttonLabel := fmt.Sprintf("%s (%s) P:%d T:%s", html.EscapeString(getDisplayUserName(&u)), html.EscapeString(user.NameOverride), user.Priority, user.Tag)
+		if userContext == user.ID {
+			buttonLabel = "-> " + buttonLabel
+		}
+		buttons := make([]tgbotapi.InlineKeyboardButton, 0)
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(
+			buttonLabel,
+			fmt.Sprintf("player:%d:%d", user.ID, chatID)))
+		buttonrows = append(buttonrows, buttons)
+	}
+	markup := tgbotapi.NewInlineKeyboardMarkup(buttonrows...)
+	messageTxt := locChatsListMessage
+	msg := tgbotapi.NewMessage(int64(update.CallbackQuery.From.ID), messageTxt)
 	msg.ReplyMarkup = markup
 	bot.Send(msg)
 	return nil
@@ -90,12 +130,12 @@ func sendNewQuestionMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Sto
 	if err != nil {
 		return fmt.Errorf("could not send message: %v", err)
 	}
-	state, pollid, chatID, err := st.GetState(update.CallbackQuery.From.ID)
+	state, pollid, chatID, userContext, err := st.GetState(update.CallbackQuery.From.ID)
 	if err != nil {
 		chatID = -1
 	}
 	state = waitingForQuestion
-	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID)
+	err = st.SaveState(update.CallbackQuery.From.ID, pollid, state, chatID, userContext)
 	if err != nil {
 		return fmt.Errorf("could not change state to waiting for questions: %v", err)
 	}
@@ -289,6 +329,40 @@ func buildEditMarkup(p *poll, noOlder, noNewer bool) *tgbotapi.InlineKeyboardMar
 	buttonrows[2] = append(buttonrows[2], buttonEditQuestion, buttonAddOptions)
 	markup := tgbotapi.NewInlineKeyboardMarkup(buttonrows...)
 
+	return &markup
+}
+
+func sendPlayerMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update, user user, fromID int) (tgbotapi.Message, error) {
+	u := tgbotapi.User{
+		ID:        user.ID,
+		FirstName: user.FirstName,
+		LastName:  user.LastName,
+		UserName:  user.UserName,
+	}
+
+	body := "Player settings:\n<pre>\n"
+	body += html.EscapeString(getDisplayUserName(&u)) + "\n"
+	body += "Overriden name: " + html.EscapeString(user.NameOverride) + "\n"
+	body += "Vote priority: " + fmt.Sprintf("%d", user.Priority) + "\n"
+	body += "Tag: " + user.Tag + "\n"
+	body += "</pre>\n\n"
+	msg := tgbotapi.NewMessage(int64(fromID), body)
+	msg.ParseMode = tgbotapi.ModeHTML
+
+	msg.ReplyMarkup = buildPlayerMarkup(user)
+
+	return bot.Send(&msg)
+}
+
+func buildPlayerMarkup(user user) *tgbotapi.InlineKeyboardMarkup {
+	query := fmt.Sprintf("%d:%d", user.ID, user.ChatID)
+
+	buttonRows := make([][]tgbotapi.InlineKeyboardButton, 0)
+	buttonRows = append(buttonRows, make([]tgbotapi.InlineKeyboardButton, 0))
+	buttonRows[0] = append(buttonRows[0], tgbotapi.NewInlineKeyboardButtonData("Tag", "playertag:"+query))
+	buttonRows[0] = append(buttonRows[0], tgbotapi.NewInlineKeyboardButtonData("Priority", "playerpriority:"+query))
+	buttonRows[0] = append(buttonRows[0], tgbotapi.NewInlineKeyboardButtonData("Name", "playername:"+query))
+	markup := tgbotapi.NewInlineKeyboardMarkup(buttonRows...)
 	return &markup
 }
 

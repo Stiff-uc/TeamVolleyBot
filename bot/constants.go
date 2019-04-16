@@ -4,6 +4,10 @@ const createNewPollQuery = "createNewPoll"
 const createPollQuery = "createpoll"
 const pollDoneQuery = "polldone"
 const selectChat = "chat"
+const selectPlayer = "player"
+const updateTag = "playertag"
+const updatePriority = "playerpriority"
+const updatePlayerName = "playername"
 const (
 	ohHi = iota
 	waitingForQuestion
@@ -14,7 +18,10 @@ const (
 	addOption
 	listChats
 	listPlayers
-	addPlayerHint
+	waitingForPlayerSettingSelect
+	waitingForTag
+	waitingForName
+	waitingForPriority
 )
 
 const (
@@ -34,4 +41,4 @@ const (
 
 var maxNumberOfUsersListed = 100
 var maxPollsInlineQuery = 5
-var maxPlayersInTeams = 5
+var maxPlayersInTeams = 18

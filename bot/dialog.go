@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -12,6 +13,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 	state := ohHi
 	pollid := -1
 	chatID := int64(-1)
+	userContext := -1
 	var err error
 
 	if strings.Contains(update.Message.Text, locAboutCommand) {
@@ -23,7 +25,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 		return err
 	}
 
-	state, pollid, chatID, err = st.GetState(update.Message.From.ID)
+	state, pollid, chatID, userContext, err = st.GetState(update.Message.From.ID)
 	if err != nil {
 		// could not retrieve state -> state is zero
 		state = ohHi
@@ -58,7 +60,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 
 	if strings.Contains(update.Message.Text, "/start") || pollid < 0 && state != waitingForQuestion {
 		state = ohHi
-		err = st.SaveState(update.Message.From.ID, pollid, state, chatID)
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID, userContext)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}
@@ -66,7 +68,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 
 	if strings.Contains(update.Message.Text, "/chat") {
 		state = listChats
-		err = st.SaveState(update.Message.From.ID, pollid, state, chatID)
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID, userContext)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}
@@ -182,7 +184,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 		}
 
 		state = editPoll
-		err = st.SaveState(update.Message.From.ID, pollid, state, chatID)
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID, userContext)
 		if err != nil {
 			return fmt.Errorf("could not save state: %v", err)
 		}
@@ -225,6 +227,83 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 			return fmt.Errorf("could not post poll: %v", err)
 		}
 		return nil
+	}
+
+	if state == waitingForPriority {
+		hasError := false
+		player, err := st.GetPlayer(userContext, chatID)
+		if err != nil {
+			log.Printf("Error finding player context")
+			hasError = true
+		} else {
+			newPriority, err := strconv.Atoi(update.Message.Text)
+			if err != nil {
+				log.Printf("Error converting priority to String")
+				hasError = true
+			} else {
+				player.Priority = newPriority
+				err = st.SavePlayer(player)
+				if err != nil {
+					log.Printf("Error saving player context")
+					hasError = true
+				}
+			}
+		}
+		if hasError {
+			state = waitingForPlayerSettingSelect
+			msg := tgbotapi.NewMessage(int64(update.Message.From.ID), "Error setting the value")
+			bot.Send(msg)
+		}
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID, userContext)
+		sendPlayerMessage(bot, update, player, update.Message.From.ID)
+	}
+
+	if state == waitingForTag {
+		hasError := false
+		player, err := st.GetPlayer(userContext, chatID)
+		if err != nil {
+			log.Printf("Error finding player context")
+			hasError = true
+		} else {
+			newTag := update.Message.Text
+			player.Tag = newTag
+			err = st.SavePlayer(player)
+			if err != nil {
+				log.Printf("Error saving player context")
+				hasError = true
+			}
+		}
+		if hasError {
+			state = waitingForPlayerSettingSelect
+			msg := tgbotapi.NewMessage(int64(update.Message.From.ID), "Error setting Tag")
+			bot.Send(msg)
+		}
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID, userContext)
+		sendPlayerMessage(bot, update, player, update.Message.From.ID)
+	}
+
+	if state == waitingForName {
+		hasError := false
+		player, err := st.GetPlayer(userContext, chatID)
+		if err != nil {
+			log.Printf("Error finding player context")
+			hasError = true
+		} else {
+			newName := update.Message.Text
+			player.NameOverride = newName
+			err = st.SavePlayer(player)
+			if err != nil {
+				log.Printf("Error saving player context")
+				hasError = true
+			}
+		}
+		if hasError {
+			state = waitingForPlayerSettingSelect
+			msg := tgbotapi.NewMessage(int64(update.Message.From.ID), "Error setting name override")
+			bot.Send(msg)
+		}
+		err = st.SaveState(update.Message.From.ID, pollid, state, chatID, userContext)
+		sendPlayerMessage(bot, update, player, update.Message.From.ID)
 	}
 
 	return nil
