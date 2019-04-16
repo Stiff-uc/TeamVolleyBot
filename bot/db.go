@@ -697,6 +697,18 @@ func (st *sqlStore) SaveUser(u *tgbotapi.User, chatID int64) error {
 	if err != nil {
 		return fmt.Errorf("could not check if user '%s' exists: %v", u.UserName, err)
 	}
+
+	//
+	stmt, err = tx.Prepare("insert or replace into PlayerInfo (ChatId, UserId, tag) values (?, ?, (select tag from PlayerInfo where ChatId=? and userId= ?))")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql statement: %v", err)
+	}
+	defer close(stmt)
+	_, err = stmt.Exec(chatID, u.ID, chatID, u.ID)
+	if err != nil {
+		return fmt.Errorf("could not update player entry: %v", err)
+	}
+
 	if cnt != 0 {
 		stmt, err = tx.Prepare("UPDATE user SET FirstName = ?, LastName = ?, UserName = ?, LastSaved = ? WHERE ID = ? and chatId = ?")
 		if err != nil {
@@ -937,7 +949,7 @@ func (st *sqlStore) GetUserChatIds(userID int) (chats []chat, err error) {
 	for row.Next() {
 		chat := &chat{}
 		if err := row.Scan(&chat.ID, &chat.Title, &chat.Status, &chat.Status); err != nil {
-			return nil, fmt.Errorf(`could not scan user chats "%d": %v`, userID, err)
+			return nil, fmt.Errorf(`could not scan chats "%d": %v`, userID, err)
 		}
 		chats = append(chats, *chat)
 		log.Printf("Add chat = %d", chat.ID)
@@ -949,13 +961,14 @@ func (st *sqlStore) GetUserChatIds(userID int) (chats []chat, err error) {
 func (st *sqlStore) GetChatUsers(chatID int64) (users []user, err error) {
 	users = []user{}
 
-	row, err := st.db.Query("select u.ID, u.ChatID, u.FirstName, u.LastName, u.UserName, u.Priority, p.Tag, p.NameOverride from user u left outer join PlayerInfo p on (u.chatID=p.chatID and u.ID=p.UserID) where u.chatID = ? order by (u.Priority) desc, u.FirstName, u.LastName, UserName", chatID)
+	row, err := st.db.Query("select u.ID, u.FirstName, u.LastName, u.UserName, u.Priority, p.Tag, p.NameOverride from user u left outer join PlayerInfo p on (u.chatID=p.chatID and u.ID=p.UserID) where u.chatID = ? order by (u.Priority) desc, u.FirstName, u.LastName, UserName", chatID)
 
 	for row.Next() {
 		user := &user{}
-		if err := row.Scan(&user.ID, &user.ChatID, &user.FirstName, &user.LastName, &user.UserName, &user.Priority, &user.Tag, &user.NameOverride); err != nil {
+		if err := row.Scan(&user.ID, &user.FirstName, &user.LastName, &user.UserName, &user.Priority, &user.Tag, &user.NameOverride); err != nil {
 			return nil, fmt.Errorf(`could not scan chat users "%d": %v`, chatID, err)
 		}
+		user.ChatID = chatID
 		users = append(users, *user)
 		log.Printf("Add chat = %d", user.ID)
 	}
@@ -964,19 +977,16 @@ func (st *sqlStore) GetChatUsers(chatID int64) (users []user, err error) {
 }
 
 func (st *sqlStore) GetPlayer(userID int, chatID int64) (u user, err error) {
-	u = user{}
 
-	row, err := st.db.Query("select u.ID, u.chatID, u.FirstName, u.LastName, u.UserName, u.Priority, p.Tag, p.NameOverride from user u left outer join PlayerInfo p on (u.chatID=p.chatID and u.ID=p.UserID) where u.chatID = ? and u.id=? ", chatID, userID)
+	row := st.db.QueryRow("select u.ID, u.FirstName, u.LastName, u.UserName, ifnull(u.Priority,0) Priority, ifnull(p.Tag,'') Tag, ifnull(p.NameOverride,'') NameOverride from user u left outer join PlayerInfo p on (u.chatID=p.chatID and u.ID=p.UserID) where u.chatID = ? and u.id=? ", chatID, userID)
 
-	for row.Next() {
-		user := &user{}
-		if err := row.Scan(&user.ID, &user.ChatID, &user.FirstName, &user.LastName, &user.UserName, &user.Priority, &user.Tag, &user.NameOverride); err != nil {
-			return u, fmt.Errorf(`could not scan user "%d" in chat "%d": %v`, userID, chatID, err)
-		}
-		return u, nil
+	u1 := &user{ID: 1}
+
+	if err := row.Scan(&u1.ID, &u1.FirstName, &u1.LastName, &u1.UserName, &u1.Priority, &u1.Tag, &u1.NameOverride); err != nil {
+		return u, fmt.Errorf(`could not scan user "%d" in chat "%d": %v`, userID, chatID, err)
 	}
-
-	return u, err
+	u1.ChatID = chatID
+	return *u1, nil
 }
 
 func (st *sqlStore) SavePlayer(u user) error {
@@ -1014,6 +1024,7 @@ func (st *sqlStore) SavePlayer(u user) error {
 	if err != nil {
 		return fmt.Errorf("could not update user entry: %v", err)
 	}
+	defer close(stmt)
 
 	return nil
 }

@@ -155,24 +155,24 @@ func buildPollMarkup(p *poll) *tgbotapi.InlineKeyboardMarkup {
 
 func buildPollListing(p *poll, st Store) (listing string) {
 	// polledUsers := make(map[int]struct{})
-	listOfUsers := make([][]*tgbotapi.User, len(p.Options))
-	var backupPlayers []*tgbotapi.User
+	listOfUsers := make([][]user, len(p.Options))
+	var backupPlayers []user
 	fieldPlayerCount := 0
 	votesForOption := make(map[int]int)
 	for _, a := range p.Answers {
 		for i, o := range p.Options {
 			if a.OptionID == o.ID {
 				votesForOption[o.ID]++
-				u, err := st.GetUser(a.UserID, p.ChatID)
+				u, err := st.GetPlayer(a.UserID, p.ChatID)
 				if i <= 2 {
 					fieldPlayerCount++
 				}
 				if err != nil {
 					log.Printf("could not get user: %v", err)
 					if i > 2 || fieldPlayerCount <= maxPlayersInTeams {
-						listOfUsers[i] = append(listOfUsers[i], &tgbotapi.User{ID: a.UserID})
+						listOfUsers[i] = append(listOfUsers[i], user{ID: a.UserID})
 					} else {
-						backupPlayers = append(backupPlayers, &tgbotapi.User{ID: a.UserID})
+						backupPlayers = append(backupPlayers, user{ID: a.UserID})
 					}
 					continue
 				}
@@ -206,10 +206,10 @@ func buildPollListing(p *poll, st Store) (listing string) {
 			usersOnAnswer := len(listOfUsers[i])
 			if len(p.Answers) < maxNumberOfUsersListed && usersOnAnswer > 0 {
 
-				listing += "" + html.EscapeString(getDisplayUserName(listOfUsers[i][0]))
+				listing += "" + html.EscapeString(getDisplayUserName2(listOfUsers[i][0]))
 				mainPlayerCount++
 				for j := 1; j+1 <= usersOnAnswer; j++ {
-					listing += ", " + html.EscapeString(getDisplayUserName(listOfUsers[i][j]))
+					listing += ", " + html.EscapeString(getDisplayUserName2(listOfUsers[i][j]))
 					mainPlayerCount++
 
 				}
@@ -222,7 +222,7 @@ func buildPollListing(p *poll, st Store) (listing string) {
 		if len(backupPlayers) > 0 {
 			listing += "\n<b>В запасе:</b> "
 			for i, user := range backupPlayers {
-				listing += html.EscapeString(getDisplayUserName(user))
+				listing += html.EscapeString(getDisplayUserName2(user))
 				if i+1 != len(backupPlayers) {
 					listing += ", "
 				} else {
@@ -234,11 +234,11 @@ func buildPollListing(p *poll, st Store) (listing string) {
 		var addPlayers = make(map[string]int)
 		addPlayerCount := 0
 		for _, u := range listOfUsers[3] {
-			addPlayers[getDisplayUserName(u)] = addPlayers[getDisplayUserName(u)] + 1
+			addPlayers[getDisplayUserName2(u)] = addPlayers[getDisplayUserName2(u)] + 1
 			addPlayerCount++
 		}
 		for _, u := range listOfUsers[4] {
-			addPlayers[getDisplayUserName(u)] = addPlayers[getDisplayUserName(u)] + 2
+			addPlayers[getDisplayUserName2(u)] = addPlayers[getDisplayUserName2(u)] + 2
 			addPlayerCount += 2
 		}
 		if addPlayerCount > 0 {
@@ -303,4 +303,21 @@ func getDisplayUserName(u *tgbotapi.User) string {
 		return name
 	}
 	return u.LastName
+}
+
+func getDisplayUserName2(u user) string {
+	usr := tgbotapi.User{
+		ID:        u.ID,
+		FirstName: u.FirstName,
+		LastName:  u.LastName,
+		UserName:  u.UserName,
+	}
+	ret := getDisplayUserName(&usr)
+	if u.NameOverride != "" {
+		ret = u.NameOverride
+	}
+	if u.Tag != "" {
+		ret = ret + " " + u.Tag
+	}
+	return ret
 }
