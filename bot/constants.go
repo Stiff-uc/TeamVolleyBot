@@ -34,4 +34,4 @@ const (
 
 var maxNumberOfUsersListed = 100
 var maxPollsInlineQuery = 5
-var maxPlayersInTeams = 18
+var maxPlayersInTeams = 5

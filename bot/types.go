@@ -27,6 +27,9 @@ type Store interface {
 	EnterChat(*tgbotapi.Chat, int) error
 	LeaveChat(*tgbotapi.Chat) error
 	GetUserChatIds(int) ([]chat, error)
+	GetChatUsers(int64) ([]user, error)
+	GetPlayer(int, int64) (user, error)
+	SavePlayer(user) error
 }
 
 type answer struct {
@@ -61,6 +64,17 @@ type poll struct {
 	Type      int
 	Options   []option
 	Answers   []answer
+}
+type user struct {
+	ID           int
+	ChatID       int64
+	FirstName    string
+	LastName     string
+	IsBot        string
+	UserName     string
+	Priority     int
+	Tag          string
+	NameOverride string
 }
 
 func isInactive(poll *poll) bool {

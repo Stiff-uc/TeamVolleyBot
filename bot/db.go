@@ -86,7 +86,7 @@ func newSQLStore(databaseFile string) *sqlStore {
 		CreatedAt INTEGER,
 		UserName TEXT,
 		Priority integer,
-		PRIMARY KEY (ID, chatId));
+		PRIMARY KEY (chatId, ID));
 	CREATE TABLE IF NOT EXISTS chat(
 		ID numeric primary key,
 		TITLE text,
@@ -101,7 +101,12 @@ func newSQLStore(databaseFile string) *sqlStore {
 		UserID INTEGER,
 		VoteIndex INTEGER,
 		PRIMARY KEY (ChatId,PollId,UserID));
-
+	CREATE TABLE IF NOT EXISTS PlayerInfo(
+		ChatId INTEGER,
+		UserID INTEGER,
+		Tag Text,
+		NameOverride text,
+		PRIMARY KEY (ChatId,UserID));
 	CREATE INDEX IF NOT EXISTS poll_index ON poll(ID);
 	CREATE INDEX IF NOT EXISTS pollmsg_index ON pollmsg(MessageID);
 	CREATE INDEX IF NOT EXISTS answer_index ON answer(PollID);
@@ -939,6 +944,78 @@ func (st *sqlStore) GetUserChatIds(userID int) (chats []chat, err error) {
 	}
 
 	return chats, nil
+}
+
+func (st *sqlStore) GetChatUsers(chatID int64) (users []user, err error) {
+	users = []user{}
+
+	row, err := st.db.Query("select u.ID, u.ChatID, u.FirstName, u.LastName, u.UserName, u.Priority, p.Tag, p.NameOverride from user u left outer join PlayerInfo p on (u.chatID=p.chatID and u.ID=p.UserID) where u.chatID = ? order by (u.Priority) desc, u.FirstName, u.LastName, UserName", chatID)
+
+	for row.Next() {
+		user := &user{}
+		if err := row.Scan(&user.ID, &user.ChatID, &user.FirstName, &user.LastName, &user.UserName, &user.Priority, &user.Tag, &user.NameOverride); err != nil {
+			return nil, fmt.Errorf(`could not scan chat users "%d": %v`, chatID, err)
+		}
+		users = append(users, *user)
+		log.Printf("Add chat = %d", user.ID)
+	}
+
+	return users, err
+}
+
+func (st *sqlStore) GetPlayer(userID int, chatID int64) (u user, err error) {
+	u = user{}
+
+	row, err := st.db.Query("select u.ID, u.chatID, u.FirstName, u.LastName, u.UserName, u.Priority, p.Tag, p.NameOverride from user u left outer join PlayerInfo p on (u.chatID=p.chatID and u.ID=p.UserID) where u.chatID = ? and u.id=? ", chatID, userID)
+
+	for row.Next() {
+		user := &user{}
+		if err := row.Scan(&user.ID, &user.ChatID, &user.FirstName, &user.LastName, &user.UserName, &user.Priority, &user.Tag, &user.NameOverride); err != nil {
+			return u, fmt.Errorf(`could not scan user "%d" in chat "%d": %v`, userID, chatID, err)
+		}
+		return u, nil
+	}
+
+	return u, err
+}
+
+func (st *sqlStore) SavePlayer(u user) error {
+	tx, err := st.db.Begin()
+	if err != nil {
+		return fmt.Errorf("could not begin database transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			if err := tx.Rollback(); err != nil {
+				log.Printf("could not rollback database change: %v", err)
+			}
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	var stmt *sql.Stmt
+	stmt, err = tx.Prepare("insert or update into PlayerInfo (ChatId, UserId, Tag, NameOverride) values (?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql statement: %v", err)
+	}
+	defer close(stmt)
+	_, err = stmt.Exec(u.ChatID, u.ID, u.Tag, u.NameOverride)
+	if err != nil {
+		return fmt.Errorf("could not update player entry: %v", err)
+	}
+
+	stmt, err = tx.Prepare("insert or replace into user (ID, ChatID, Priority) values (?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("could not prepare sql statement: %v", err)
+	}
+	defer close(stmt)
+	_, err = stmt.Exec(u.ID, u.ChatID, u.Priority)
+	if err != nil {
+		return fmt.Errorf("could not update user entry: %v", err)
+	}
+
+	return nil
 }
 
 func contains(slice []int, n int) bool {
