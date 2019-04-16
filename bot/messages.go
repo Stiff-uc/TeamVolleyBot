@@ -154,48 +154,103 @@ func buildPollMarkup(p *poll) *tgbotapi.InlineKeyboardMarkup {
 }
 
 func buildPollListing(p *poll, st Store) (listing string) {
-	polledUsers := make(map[int]struct{})
+	// polledUsers := make(map[int]struct{})
 	listOfUsers := make([][]*tgbotapi.User, len(p.Options))
+	var backupPlayers []*tgbotapi.User
+	fieldPlayerCount := 0
 	votesForOption := make(map[int]int)
-	for i, o := range p.Options {
-		for _, a := range p.Answers {
+	for _, a := range p.Answers {
+		for i, o := range p.Options {
 			if a.OptionID == o.ID {
 				votesForOption[o.ID]++
 				u, err := st.GetUser(a.UserID, p.ChatID)
+				if i <= 2 {
+					fieldPlayerCount++
+				}
 				if err != nil {
 					log.Printf("could not get user: %v", err)
-					listOfUsers[i] = append(listOfUsers[i], &tgbotapi.User{ID: a.UserID})
+					if i > 2 || fieldPlayerCount <= maxPlayersInTeams {
+						listOfUsers[i] = append(listOfUsers[i], &tgbotapi.User{ID: a.UserID})
+					} else {
+						backupPlayers = append(backupPlayers, &tgbotapi.User{ID: a.UserID})
+					}
 					continue
 				}
-				polledUsers[u.ID] = struct{}{}
-				listOfUsers[i] = append(listOfUsers[i], u)
+				if i > 2 || fieldPlayerCount <= maxPlayersInTeams {
+					// polledUsers[u.ID] = struct{}{}
+					listOfUsers[i] = append(listOfUsers[i], u)
+				} else {
+					backupPlayers = append(backupPlayers, u)
+				}
 			}
 		}
 	}
 
-	listing += emoji.Sprintf(":bar_chart:<b>%s</b>\n", html.EscapeString(p.Question))
-	//log.Printf("Create listing for question: %s\n", p.Question)
+	if p.Type == typeGame {
+		listing += emoji.Sprintf(":volleyball:<b>%s</b>\n", html.EscapeString(p.Question))
+		//log.Printf("Create listing for question: %s\n", p.Question)
+		opts := [3]string{emoji.Sprintf(":red_circle:"), emoji.Sprintf(":white_circle:"), emoji.Sprintf(":blue_circle:")}
+		mainPlayerCount := 0
+		for i := 0; i <= 2; i++ {
+			var part string
+			if len(p.Answers) > 0 {
+				part = fmt.Sprintf("%d -", len(listOfUsers[i])) //fmt.Sprintf(" (%.0f%%)", 100.*float64(votesForOption[o.ID])/float64(len(polledUsers)))
+				if votesForOption[p.Options[i].ID] != p.Options[i].Ctr {
+					log.Printf("Counter for option #%d is off: %d stored vs. %d counted", p.Options[i].ID, p.Options[i].Ctr, votesForOption[p.Options[i].ID])
+				}
+			}
+			if len(listOfUsers[i]) > 0 {
+				listing += fmt.Sprintf("\n<b>%s %s </b>", html.EscapeString(opts[i]), part)
+			}
 
-	for i, o := range p.Options {
-		var part string
-		if len(p.Answers) > 0 {
-			part = fmt.Sprintf(" (%.0f%%)", 100.*float64(votesForOption[o.ID])/float64(len(polledUsers)))
-			if votesForOption[o.ID] != o.Ctr {
-				log.Printf("Counter for option #%d is off: %d stored vs. %d counted", o.ID, o.Ctr, votesForOption[o.ID])
+			usersOnAnswer := len(listOfUsers[i])
+			if len(p.Answers) < maxNumberOfUsersListed && usersOnAnswer > 0 {
+
+				listing += "" + html.EscapeString(getDisplayUserName(listOfUsers[i][0]))
+				mainPlayerCount++
+				for j := 1; j+1 <= usersOnAnswer; j++ {
+					listing += ", " + html.EscapeString(getDisplayUserName(listOfUsers[i][j]))
+					mainPlayerCount++
+
+				}
+			}
+			if len(listOfUsers[i]) > 0 {
+				listing += "\n"
 			}
 		}
-		listing += fmt.Sprintf("\n<b>%s</b>%s", html.EscapeString(o.Text), part)
 
-		usersOnAnswer := len(listOfUsers[i])
-		if len(p.Answers) < maxNumberOfUsersListed && usersOnAnswer > 0 {
-			for j := 0; j+1 < usersOnAnswer; j++ {
-				listing += "\n\u251C " + html.EscapeString(getDisplayUserName(listOfUsers[i][j]))
+		if len(backupPlayers) > 0 {
+			listing += "\n<b>В запасе:</b> "
+			for i, user := range backupPlayers {
+				listing += html.EscapeString(getDisplayUserName(user))
+				if i+1 != len(backupPlayers) {
+					listing += ", "
+				} else {
+					listing += "\n"
+				}
 			}
-			listing += "\n\u2514 " + html.EscapeString(getDisplayUserName(listOfUsers[i][usersOnAnswer-1]))
 		}
-		listing += "\n"
+
+		var addPlayers = make(map[string]int)
+		addPlayerCount := 0
+		for _, u := range listOfUsers[3] {
+			addPlayers[getDisplayUserName(u)] = addPlayers[getDisplayUserName(u)] + 1
+			addPlayerCount++
+		}
+		for _, u := range listOfUsers[4] {
+			addPlayers[getDisplayUserName(u)] = addPlayers[getDisplayUserName(u)] + 2
+			addPlayerCount += 2
+		}
+		if addPlayerCount > 0 {
+			listing += "\n<b>Приглашенные:</b> "
+			for user, added := range addPlayers {
+				listing += html.EscapeString(user) + "(" + fmt.Sprintf("%d", added) + ") "
+			}
+		}
+
+		totalPlayers := mainPlayerCount + addPlayerCount + len(backupPlayers)
+		listing += emoji.Sprint(fmt.Sprintf("\n%d :busts_in_silhouette:\n", totalPlayers))
 	}
-	listing += emoji.Sprint(fmt.Sprintf("\n%d :busts_in_silhouette:\n", len(polledUsers)))
 	return listing
 }
 

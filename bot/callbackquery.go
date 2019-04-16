@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -166,10 +165,7 @@ func updatePollMessages(bot *tgbotapi.BotAPI, pollid int, st Store) error {
 	for _, msg := range msgs {
 		ed.Text = listing
 		ed.InlineMessageID = msg.InlineMessageID
-		x, err := bot.Send(ed)
-
-		s, _ := json.MarshalIndent(x, "", "\t")
-		log.Printf("APIReturn:\n %s ", s)
+		_, err := bot.Send(ed)
 
 		if err != nil {
 			if strings.Contains(err.Error(), "MESSAGE_ID_INVALID") {

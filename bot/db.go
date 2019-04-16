@@ -85,6 +85,7 @@ func newSQLStore(databaseFile string) *sqlStore {
 		LastSaved INTEGER,
 		CreatedAt INTEGER,
 		UserName TEXT,
+		Priority integer,
 		PRIMARY KEY (ID, chatId));
 	CREATE TABLE IF NOT EXISTS chat(
 		ID numeric primary key,
@@ -94,6 +95,12 @@ func newSQLStore(databaseFile string) *sqlStore {
 		CreatedAt INTEGER,
 		adminUserId integer		
 	);
+	CREATE TABLE IF NOT EXISTS answerSeq(
+		ChatId INTEGER,
+		PollId INTEGER,
+		UserID INTEGER,
+		VoteIndex INTEGER,
+		PRIMARY KEY (ChatId,PollId,UserID));
 
 	CREATE INDEX IF NOT EXISTS poll_index ON poll(ID);
 	CREATE INDEX IF NOT EXISTS pollmsg_index ON pollmsg(MessageID);
@@ -320,7 +327,7 @@ func (st *sqlStore) GetOptions(pollid int) ([]option, error) {
 func (st *sqlStore) GetAnswers(pollid int) ([]answer, error) {
 	answers := make([]answer, 0)
 
-	rows, err := st.db.Query("SELECT ID, PollID, OptionID, UserID FROM answer WHERE PollID = ?", pollid)
+	rows, err := st.db.Query("SELECT a.ID, a.PollID, a.OptionID, a.UserID FROM answer a left outer join poll p on (a.PollID = p.id) left outer join user u on (a.UserID = u.id and p.chatID=u.chatID )left outer join answerSeq seq on (p.chatID=seq.chatID and p.id = seq.pollId and u.ID = seq.userID)WHERE a.PollID = ? order by ifnull(seq.voteIndex,0)-ifnull(u.priority,0), a.lastSaved", pollid)
 	if err != nil {
 		return answers, fmt.Errorf("could not query answers: %v", err)
 	}
@@ -429,12 +436,22 @@ func (st *sqlStore) SaveAnswer(p *poll, a answer) (unvoted bool, err error) {
 					}
 				}
 			}
-			// update answer
+			// insert answer
 			stmt, err = tx.Prepare("INSERT INTO answer(PollID, OptionID, UserID, LastSaved, CreatedAt) values(?, ?, ?, ?, ?)")
 			if err != nil {
 				return false, fmt.Errorf("could not prepare sql statement: %v", err)
 			}
 			_, err = stmt.Exec(a.PollID, a.OptionID, a.UserID, time.Now().UTC().Unix(), time.Now().UTC().Unix())
+			if err != nil {
+				return false, fmt.Errorf("could not update vote: %v", err)
+			}
+
+			// insert answer order index
+			stmt, err = tx.Prepare("insert or ignore into answerSeq (userId, chatID, pollID, voteIndex) values (?, ? , ?, (select ifnull(max(voteIndex),1) from answerSeq aa where aa.chatId= ? and aa.pollId=?))")
+			if err != nil {
+				return false, fmt.Errorf("could not prepare sql statement: %v", err)
+			}
+			_, err = stmt.Exec(a.UserID, p.ChatID, a.PollID, p.ChatID, a.PollID)
 			if err != nil {
 				return false, fmt.Errorf("could not update vote: %v", err)
 			}
@@ -493,6 +510,17 @@ func (st *sqlStore) SaveAnswer(p *poll, a answer) (unvoted bool, err error) {
 		_, err = stmt.Exec(a.PollID, a.OptionID, a.UserID, time.Now().UTC().Unix(), time.Now().UTC().Unix())
 		if err != nil {
 			return false, fmt.Errorf("could not insert answer: %v", err)
+		}
+		if optIndex <= 2 {
+			// insert answer order index
+			stmt, err = tx.Prepare("insert or ignore into answerSeq (userId, chatID, pollID, voteIndex) values (?, ? , ?, (select ifnull(max(voteIndex)+1,1) from answerSeq aa where aa.chatId= ? and aa.pollId=?))")
+			if err != nil {
+				return false, fmt.Errorf("could not prepare sql statement: %v", err)
+			}
+			_, err = stmt.Exec(a.UserID, p.ChatID, a.PollID, p.ChatID, a.PollID)
+			if err != nil {
+				return false, fmt.Errorf("could not update vote: %v", err)
+			}
 		}
 	}
 

@@ -100,7 +100,7 @@ func handleDialog(bot *tgbotapi.BotAPI, update tgbotapi.Update, st Store) error 
 		p := &poll{
 			Question: update.Message.Text,
 			UserID:   update.Message.From.ID,
-			Type:     1,
+			Type:     typeGame,
 			ChatID:   chatID,
 		}
 

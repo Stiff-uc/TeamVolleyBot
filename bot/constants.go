@@ -27,5 +27,11 @@ const (
 	multipleChoice
 )
 
+const (
+	typeSkillsVote = iota
+	typeGame
+)
+
 var maxNumberOfUsersListed = 100
 var maxPollsInlineQuery = 5
+var maxPlayersInTeams = 18
